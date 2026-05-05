@@ -5,7 +5,7 @@
 
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Bell, Heart, ArrowRight, Plus, LogIn, LogOut, LayoutDashboard, Copy, Terminal, CheckCircle2, Flag, AlertTriangle, Shield, Check, Share2, Edit, User as UserIcon } from 'lucide-react';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { collection, query, orderBy, limit, startAfter, getDocs, onSnapshot, doc, updateDoc, increment, setDoc, deleteDoc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { db, handleFirestoreError, OperationType } from './lib/firebase';
@@ -16,14 +16,20 @@ import { EditArtworkModal } from './components/EditArtworkModal';
 import { EditProfileModal } from './components/EditProfileModal';
 import { LandingPage } from './components/LandingPage';
 import { SelasarLogo } from './components/SelasarLogo';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OptimizedImage } from './components/OptimizedImage';
 import { Artwork, UserProfile, Report } from './types';
 import { ArtworkCardSkeleton, ProfileHeaderSkeleton, ArtworkDetailSkeleton } from './components/Skeleton';
+import { useLikeArtwork } from './hooks/useLikeArtwork';
+import { useCopyPrompt } from './hooks/useCopyPrompt';
+import { ADMIN_EMAIL } from './utils/constants';
+import { formatRelativeTime, isAdmin } from './utils/helpers';
 
 // --- Application ---
 
-const Navbar = ({ onOpenUpload }: { onOpenUpload: () => void }) => {
+const Navbar = memo(({ onOpenUpload }: { onOpenUpload: () => void }) => {
   const { user, userProfile, signIn, logout } = useAuth();
-  const isAdmin = user?.email === 'MKikik27@gmail.com';
+  const isUserAdmin = isAdmin(user?.email);
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -43,7 +49,7 @@ const Navbar = ({ onOpenUpload }: { onOpenUpload: () => void }) => {
                 <LayoutDashboard className="w-4 h-4" />
                 Dasbor
               </Link>
-              {isAdmin && (
+              {isUserAdmin && (
                 <Link to="/moderation" className={`${location.pathname === '/moderation' ? 'text-primary' : 'hover:text-white'} transition-colors flex items-center gap-2`}>
                   <Shield className="w-4 h-4" />
                   Moderasi
@@ -71,7 +77,11 @@ const Navbar = ({ onOpenUpload }: { onOpenUpload: () => void }) => {
             </button>
 
             <div className="flex items-center gap-2 p-1.5 glass-pill pr-2 group relative">
-              <img src={userProfile?.avatarUrl || user.photoURL || ''} className="w-8 h-8 rounded-full object-cover" />
+              <OptimizedImage 
+                src={userProfile?.avatarUrl || user.photoURL || ''} 
+                alt={user.displayName || 'User'}
+                className="w-8 h-8 rounded-full object-cover" 
+              />
               <button onClick={logout} className="p-2 hover:text-red-400 transition-colors">
                 <LogOut className="w-4 h-4" />
               </button>
@@ -89,7 +99,7 @@ const Navbar = ({ onOpenUpload }: { onOpenUpload: () => void }) => {
       </div>
     </nav>
   );
-};
+});
 
 const ModerationQueue = () => {
   const [reports, setReports] = useState<Report[]>([]);
@@ -196,49 +206,22 @@ const ArtworkCard: React.FC<{
   onArtworkClick?: (id: string) => void,
   onShareClick?: (artwork: Artwork) => void,
   onEditClick?: (artwork: Artwork) => void
-}> = ({ artwork, isDashboard = false, onArtistClick, onArtworkClick, onShareClick, onEditClick }) => {
+}> = memo(({ artwork, isDashboard = false, onArtistClick, onArtworkClick, onShareClick, onEditClick }) => {
   const { user } = useAuth();
-  const [isLiked, setIsLiked] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { isLiked, toggleLike } = useLikeArtwork(artwork.id);
+  const { copied, copyPrompt } = useCopyPrompt();
   const [showTooltip, setShowTooltip] = useState(false);
   const [isReporting, setIsReporting] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    const likeDoc = doc(db, 'artworks', artwork.id, 'likes', user.uid);
-    return onSnapshot(likeDoc, (snap) => setIsLiked(snap.exists()));
-  }, [user, artwork.id]);
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user) return;
-    const artworkRef = doc(db, 'artworks', artwork.id);
-    const likeRef = doc(db, 'artworks', artwork.id, 'likes', user.uid);
-
-    try {
-      if (isLiked) {
-        await deleteDoc(likeRef);
-        await updateDoc(artworkRef, { likesCount: increment(-1) });
-      } else {
-        await setDoc(likeRef, { userId: user.uid, createdAt: new Date() });
-        await updateDoc(artworkRef, { likesCount: increment(1) });
-      }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, 'artworks');
-    }
+    await toggleLike();
   };
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await navigator.clipboard.writeText(artwork.prompt);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    
-    try {
-      await updateDoc(doc(db, 'artworks', artwork.id), { copyCount: increment(1) });
-    } catch (e) {
-      console.error(e);
-    }
+    await copyPrompt(artwork.id, artwork.prompt);
   };
 
   const handleReport = async (e: React.MouseEvent) => {
@@ -274,7 +257,11 @@ const ArtworkCard: React.FC<{
       className="group rounded-card overflow-hidden bg-white/5 border border-white/10 flex flex-col h-full cursor-pointer transition-shadow"
     >
       <div className="aspect-[4/5] overflow-hidden relative">
-        <img src={artwork.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <OptimizedImage 
+          src={artwork.imageUrl} 
+          alt={artwork.title}
+          className="w-full h-full object-cover" 
+        />
         <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-6">
           {isDashboard && (
             <button 
@@ -399,7 +386,7 @@ const ArtworkCard: React.FC<{
       </div>
     </motion.div>
   );
-};
+});
 
 const DashboardView = ({ onArtistClick, onArtworkClick, onShareClick, onEditClick }: { onArtistClick: (uid: string) => void, onArtworkClick: (id: string) => void, onShareClick: (artwork: Artwork) => void, onEditClick: (artwork: Artwork) => void }) => {
   const { user, userProfile } = useAuth();
@@ -431,7 +418,11 @@ const DashboardView = ({ onArtistClick, onArtworkClick, onShareClick, onEditClic
           <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 blur-[100px] -translate-y-1/2 translate-x-1/2" />
           
           <div className="relative group">
-            <img src={userProfile?.avatarUrl || user.photoURL || ''} className="w-32 h-32 rounded-full border-2 border-primary/20 p-1 object-cover bg-dark-bg" />
+            <OptimizedImage 
+              src={userProfile?.avatarUrl || user.photoURL || ''} 
+              alt={userProfile?.username || user.displayName || 'User'}
+              className="w-32 h-32 rounded-full border-2 border-primary/20 p-1 object-cover bg-dark-bg" 
+            />
             <button 
               onClick={() => setIsEditProfileOpen(true)}
               className="absolute bottom-0 right-0 p-2.5 bg-primary text-black rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all border-4 border-dark-bg"
@@ -534,7 +525,11 @@ const ArtistProfileView = ({ artistId, onArtistClick, onArtworkClick, onShareCli
         <ProfileHeaderSkeleton />
       ) : profile ? (
         <div className="flex flex-col md:flex-row items-center gap-8 mb-20 bg-white/[0.02] border border-white/5 p-12 rounded-card backdrop-blur-xl">
-          <img src={profile.avatarUrl || ''} className="w-32 h-32 rounded-full border-2 border-primary/20 p-1" />
+          <OptimizedImage 
+            src={profile.avatarUrl || ''} 
+            alt={profile.username}
+            className="w-32 h-32 rounded-full border-2 border-primary/20 p-1" 
+          />
           <div className="flex-1 text-center md:text-left">
             <h1 className="text-5xl font-extrabold mb-4">{profile.username}</h1>
             <p className="text-white/60 text-lg leading-relaxed max-w-2xl italic font-light">
@@ -583,8 +578,8 @@ const ArtworkDetailView = ({ artworkId, onArtistClick, onArtworkClick, onShareCl
   const [artist, setArtist] = useState<UserProfile | null>(null);
   const [related, setRelated] = useState<Artwork[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [isLiked, setIsLiked] = useState(false);
+  const { isLiked, toggleLike } = useLikeArtwork(artworkId);
+  const { copied, copyPrompt } = useCopyPrompt();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -619,40 +614,14 @@ const ArtworkDetailView = ({ artworkId, onArtistClick, onArtworkClick, onShareCl
     fetchData();
   }, [artworkId]);
 
-  useEffect(() => {
-    if (!user || !artworkId) return;
-    const likeDoc = doc(db, 'artworks', artworkId, 'likes', user.uid);
-    return onSnapshot(likeDoc, (snap) => setIsLiked(snap.exists()));
-  }, [user, artworkId]);
-
   const handleLike = async () => {
     if (!user || !artwork) return;
-    const artworkRef = doc(db, 'artworks', artwork.id);
-    const likeRef = doc(db, 'artworks', artwork.id, 'likes', user.uid);
-
-    try {
-      if (isLiked) {
-        await deleteDoc(likeRef);
-        await updateDoc(artworkRef, { likesCount: increment(-1) });
-      } else {
-        await setDoc(likeRef, { userId: user.uid, createdAt: new Date() });
-        await updateDoc(artworkRef, { likesCount: increment(1) });
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    await toggleLike();
   };
 
   const handleCopy = async () => {
     if (!artwork) return;
-    await navigator.clipboard.writeText(artwork.prompt);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    try {
-      await updateDoc(doc(db, 'artworks', artwork.id), { copyCount: increment(1) });
-    } catch (e) {
-      console.error(e);
-    }
+    await copyPrompt(artwork.id, artwork.prompt);
   };
 
   if (loading && !artwork) return <ArtworkDetailSkeleton />;
@@ -667,7 +636,12 @@ const ArtworkDetailView = ({ artworkId, onArtistClick, onArtworkClick, onShareCl
           animate={{ opacity: 1, x: 0 }}
           className="relative rounded-card overflow-hidden border border-white/5 shadow-2xl group"
         >
-          <img src={artwork.imageUrl} className="w-full h-auto object-cover" referrerPolicy="no-referrer" />
+          <OptimizedImage 
+            src={artwork.imageUrl} 
+            alt={artwork.title}
+            className="w-full h-auto object-cover"
+            priority
+          />
           <div className="absolute top-6 right-6">
             <motion.button 
               whileTap={{ scale: 0.8 }}
@@ -698,7 +672,11 @@ const ArtworkDetailView = ({ artworkId, onArtistClick, onArtworkClick, onShareCl
               onClick={() => onArtistClick(artwork.artistId)}
               className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all group"
             >
-              <img src={artist?.avatarUrl || ''} className="w-12 h-12 rounded-full border border-white/10" />
+              <OptimizedImage 
+                src={artist?.avatarUrl || ''} 
+                alt={artist?.username || 'Artist'}
+                className="w-12 h-12 rounded-full border border-white/10" 
+              />
               <div className="text-left">
                 <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-0.5">Artist</p>
                 <p className="font-bold group-hover:text-primary transition-colors">{artwork.artistName}</p>
@@ -953,8 +931,9 @@ export default function App() {
   const [isEditOpen, setIsEditOpen] = useState(false);
 
   return (
-    <BrowserRouter>
-      <AppContent 
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AppContent 
         isUploadOpen={isUploadOpen} 
         setIsUploadOpen={setIsUploadOpen}
         isShareOpen={isShareOpen}
@@ -966,7 +945,8 @@ export default function App() {
         isEditOpen={isEditOpen}
         setIsEditOpen={setIsEditOpen}
       />
-    </BrowserRouter>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 
