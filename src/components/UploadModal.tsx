@@ -1,9 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { X, Upload, Send, Sparkles, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 
 interface UploadModalProps {
@@ -37,6 +36,29 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
     }
   };
 
+  const uploadToImgBB = async (file: File): Promise<string> => {
+    const apiKey = import.meta.env.VITE_IMGBB_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('ImgBB API key is missing. Please add VITE_IMGBB_API_KEY to your .env file.');
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload image to ImgBB');
+    }
+
+    const data = await response.json();
+    return data.data.url;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !imageFile) return;
@@ -48,16 +70,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
       .filter(t => t.length > 0);
 
     try {
-      // 1. Upload Image to Storage
-      const storageRef = ref(storage, `artworks/${user.uid}/${Date.now()}_${imageFile.name}`);
-      const uploadResult = await uploadBytes(storageRef, imageFile);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      // 1. Upload Image to ImgBB
+      setUploadProgress(30);
+      const imageUrl = await uploadToImgBB(imageFile);
+      setUploadProgress(70);
 
       // 2. Add Document to Firestore
       await addDoc(collection(db, 'artworks'), {
         title: formData.title,
         prompt: formData.prompt,
-        imageUrl: downloadUrl,
+        imageUrl: imageUrl,
         tags: tagsArray,
         artistId: user.uid,
         artistName: user.displayName || 'Anon Artist',
@@ -65,10 +87,19 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
         copyCount: 0,
         createdAt: serverTimestamp(),
       });
+      
+      setUploadProgress(100);
       onSuccess();
       onClose();
+      
+      // Reset form
+      setFormData({ title: '', prompt: '', tags: '' });
+      setImageFile(null);
+      setImagePreview(null);
+      setUploadProgress(0);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'artworks');
+      console.error('Upload error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to upload artwork. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -169,6 +200,22 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3.5 text-sm outline-none focus:border-primary/50 resize-none"
                 />
               </div>
+
+              {loading && uploadProgress > 0 && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs text-white/40">
+                    <span>Uploading...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${uploadProgress}%` }}
+                      className="h-full bg-primary"
+                    />
+                  </div>
+                </div>
+              )}
 
               <button 
                 disabled={loading || !imageFile}
