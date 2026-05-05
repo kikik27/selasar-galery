@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, Image as ImageIcon, Loader2, Save, Camera } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile } from '../types';
 
 interface EditProfileModalProps {
@@ -45,6 +44,29 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     }
   };
 
+  const uploadToImgBB = async (file: File): Promise<string> => {
+    const apiKey = import.meta.env.VITE_IMGBB_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('ImgBB API key is missing. Please add VITE_IMGBB_API_KEY to your .env file.');
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload image to ImgBB');
+    }
+
+    const data = await response.json();
+    return data.data.url;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
@@ -53,11 +75,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     try {
       let avatarUrl = profile.avatarUrl;
 
-      // 1. Upload new avatar if selected
+      // 1. Upload new avatar to ImgBB if selected
       if (imageFile) {
-        const storageRef = ref(storage, `avatars/${profile.uid}/${Date.now()}_${imageFile.name}`);
-        const uploadResult = await uploadBytes(storageRef, imageFile);
-        avatarUrl = await getDownloadURL(uploadResult.ref);
+        avatarUrl = await uploadToImgBB(imageFile);
       }
 
       // 2. Update Firestore profile
@@ -77,7 +97,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
       onSuccess(updatedProfile);
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'users');
+      console.error('Update error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to update profile. Please try again.');
     } finally {
       setLoading(false);
     }
