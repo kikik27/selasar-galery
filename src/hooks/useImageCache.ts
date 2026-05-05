@@ -2,23 +2,31 @@ import { useState, useEffect } from 'react';
 
 interface ImageCacheEntry {
   url: string;
-  blob: string;
+  dataUrl: string;
   timestamp: number;
 }
 
 const CACHE_NAME = 'selasar-image-cache';
 const CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Convert Blob to Base64 Data URL
+const blobToDataURL = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 class ImageCacheManager {
   private memoryCache: Map<string, string> = new Map();
   
   async get(url: string): Promise<string | null> {
-    // Check memory cache first
     if (this.memoryCache.has(url)) {
       return this.memoryCache.get(url)!;
     }
 
-    // Check IndexedDB
     try {
       const db = await this.openDB();
       const tx = db.transaction('images', 'readonly');
@@ -26,27 +34,22 @@ class ImageCacheManager {
       const entry = await this.promisifyRequest<ImageCacheEntry>(store.get(url));
       
       if (entry) {
-        // Check if expired
         if (Date.now() - entry.timestamp < CACHE_EXPIRY) {
-          this.memoryCache.set(url, entry.blob);
-          return entry.blob;
+          this.memoryCache.set(url, entry.dataUrl);
+          return entry.dataUrl;
         } else {
-          // Remove expired entry
           await this.remove(url);
         }
       }
     } catch (e) {
       console.warn('IndexedDB cache read failed:', e);
     }
-
     return null;
   }
 
-  async set(url: string, blob: string): Promise<void> {
-    // Set in memory cache
-    this.memoryCache.set(url, blob);
+  async set(url: string, dataUrl: string): Promise<void> {
+    this.memoryCache.set(url, dataUrl);
 
-    // Set in IndexedDB
     try {
       const db = await this.openDB();
       const tx = db.transaction('images', 'readwrite');
@@ -54,7 +57,7 @@ class ImageCacheManager {
       
       const entry: ImageCacheEntry = {
         url,
-        blob,
+        dataUrl,
         timestamp: Date.now()
       };
       
@@ -77,26 +80,11 @@ class ImageCacheManager {
     }
   }
 
-  async clear(): Promise<void> {
-    this.memoryCache.clear();
-    
-    try {
-      const db = await this.openDB();
-      const tx = db.transaction('images', 'readwrite');
-      const store = tx.objectStore('images');
-      await this.promisifyRequest(store.clear());
-    } catch (e) {
-      console.warn('IndexedDB cache clear failed:', e);
-    }
-  }
-
   private openDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(CACHE_NAME, 1);
-      
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
-      
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
         if (!db.objectStoreNames.contains('images')) {
@@ -142,22 +130,25 @@ export function useImageCache(url: string | undefined) {
           return;
         }
 
-        // Fetch image
+        // Fetch image if not cached
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch image');
         
         const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
+        
+        // Convert Blob to Base64 to avoid object URL lifetime issues (which causes flickering/cancels)
+        const dataUrl = await blobToDataURL(blob);
 
         if (isMounted) {
-          setCachedUrl(objectUrl);
+          setCachedUrl(dataUrl);
           setIsLoading(false);
           
-          // Cache for future use
-          cacheManager.set(url, objectUrl);
+          // Cache in memory and IndexedDB (async, doesn't block UI)
+          cacheManager.set(url, dataUrl);
         }
       } catch (e) {
         if (isMounted) {
+          console.warn(`Failed to cache image ${url}, falling back to direct URL:`, e);
           setError(e instanceof Error ? e : new Error('Unknown error'));
           setIsLoading(false);
           // Fallback to original URL

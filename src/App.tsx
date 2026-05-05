@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { motion, AnimatePresence } from 'motion/react';
-import { Search, Bell, Heart, ArrowRight, Plus, LogIn, LogOut, LayoutDashboard, Copy, Terminal, CheckCircle2, Flag, AlertTriangle, Shield, Check, Share2, Edit, User as UserIcon } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Heart, ArrowRight, Plus, LogIn, LogOut, LayoutDashboard, Copy, Terminal, CheckCircle2, Flag, AlertTriangle, Shield, Check, Share2, Edit, User as UserIcon, Menu, X } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { collection, query, orderBy, limit, startAfter, getDocs, onSnapshot, doc, updateDoc, increment, setDoc, deleteDoc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, useParams } from 'react-router-dom';
@@ -32,72 +32,164 @@ const Navbar = memo(({ onOpenUpload }: { onOpenUpload: () => void }) => {
   const isUserAdmin = isAdmin(user?.email);
   const location = useLocation();
   const navigate = useNavigate();
-  
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navLinks = [
+    { to: '/gallery', label: 'Jelajahi', icon: Search },
+    ...(user ? [
+      { to: '/dashboard', label: 'Dasbor', icon: LayoutDashboard },
+      ...(isUserAdmin ? [{ to: '/moderation', label: 'Moderasi', icon: Shield }] : []),
+    ] : []),
+  ];
+
+  const closeMenu = () => setMobileMenuOpen(false);
+
   return (
-    <nav className="fixed top-0 left-0 w-full z-50 px-6 py-4 flex items-center justify-between bg-dark-bg/60 backdrop-blur-xl border-b border-white/5">
-      <div className="flex items-center gap-10">
-        <Link to="/" className="flex items-center gap-2 group">
-          <SelasarLogo className="w-8 h-8 group-hover:scale-110 transition-transform" />
-          <span className="text-xl font-extrabold tracking-tight">Selasar</span>
-        </Link>
-        
-        <div className="hidden lg:flex items-center gap-8 text-sm font-medium text-white/50">
-          <Link to="/gallery" className={`${location.pathname === '/gallery' ? 'text-primary' : 'hover:text-white'} transition-colors`}>Jelajahi</Link>
-          {user && (
-            <>
-              <Link to="/dashboard" className={`${location.pathname === '/dashboard' ? 'text-primary' : 'hover:text-white'} transition-colors flex items-center gap-2`}>
-                <LayoutDashboard className="w-4 h-4" />
-                Dasbor
+    <>
+      <nav className="fixed top-0 left-0 w-full z-50 px-4 sm:px-6 py-3 flex items-center justify-between bg-dark-bg/70 backdrop-blur-xl border-b border-white/5">
+        {/* Left: Logo */}
+        <div className="flex items-center gap-6">
+          <Link to="/" className="flex items-center gap-2 group">
+            <SelasarLogo className="w-8 h-8 group-hover:scale-110 transition-transform" />
+            <span className="text-lg font-extrabold tracking-tight hidden sm:block">Selasar</span>
+          </Link>
+          
+          {/* Desktop Nav Links */}
+          <div className="hidden lg:flex items-center gap-6 text-sm font-medium text-white/50">
+            {navLinks.map(({ to, label, icon: Icon }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`flex items-center gap-2 ${
+                  location.pathname === to ? 'text-primary' : 'hover:text-white'
+                } transition-colors`}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
               </Link>
-              {isUserAdmin && (
-                <Link to="/moderation" className={`${location.pathname === '/moderation' ? 'text-primary' : 'hover:text-white'} transition-colors flex items-center gap-2`}>
-                  <Shield className="w-4 h-4" />
-                  Moderasi
-                </Link>
-              )}
-            </>
-          )}
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="flex items-center gap-4">
-        {user ? (
-          <>
-            <button 
-              onClick={onOpenUpload}
-              className="hidden sm:flex items-center gap-2 px-4 py-2 glass-pill bg-primary/20 border-primary/20 text-primary hover:bg-primary/30 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="text-xs font-bold">Unggah Karya</span>
-            </button>
-
-            <button className="p-2.5 rounded-full bg-white/5 border border-white/10 relative">
-              <Bell className="w-4 h-4" />
-              <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-dark-bg" />
-            </button>
-
-            <div className="flex items-center gap-2 p-1.5 glass-pill pr-2 group relative">
-              <OptimizedImage 
-                src={userProfile?.avatarUrl || user.photoURL || ''} 
-                alt={user.displayName || 'User'}
-                className="w-8 h-8 rounded-full object-cover" 
-              />
-              <button onClick={logout} className="p-2 hover:text-red-400 transition-colors">
-                <LogOut className="w-4 h-4" />
+        {/* Right: Actions */}
+        <div className="flex items-center gap-3">
+          {user ? (
+            <>
+              {/* Upload button - desktop */}
+              <button 
+                onClick={onOpenUpload}
+                className="hidden sm:flex items-center gap-2 px-4 py-2 glass-pill bg-primary/20 border-primary/20 text-primary hover:bg-primary/30 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span className="text-xs font-bold">Unggah Karya</span>
               </button>
-            </div>
-          </>
-        ) : (
-          <button 
-            onClick={signIn}
-            className="flex items-center gap-2 px-6 py-2.5 bg-white text-black rounded-xl font-bold text-sm tracking-tight hover:bg-white/90 transition-all"
+
+              {/* User Avatar */}
+              <div className="flex items-center gap-2 p-1.5 glass-pill pr-2 group relative">
+                <OptimizedImage 
+                  src={userProfile?.avatarUrl || user.photoURL || ''} 
+                  alt={user.displayName || 'User'}
+                  className="w-8 h-8 rounded-full object-cover" 
+                />
+                <button onClick={logout} className="p-2 hover:text-red-400 transition-colors">
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <button 
+              onClick={signIn}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white text-black rounded-xl font-bold text-sm tracking-tight hover:bg-white/90 transition-all"
+            >
+              <LogIn className="w-4 h-4" />
+              <span className="hidden sm:block">Masuk</span>
+            </button>
+          )}
+
+          {/* Mobile Hamburger */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="lg:hidden p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
           >
-            <LogIn className="w-4 h-4" />
-            Masuk
+            {mobileMenuOpen ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
           </button>
+        </div>
+      </nav>
+
+      {/* Mobile Menu Overlay */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+              onClick={closeMenu}
+            />
+            
+            {/* Menu Panel */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+              className="fixed top-0 right-0 h-full w-72 bg-dark-bg/95 backdrop-blur-xl border-l border-white/10 z-50 lg:hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                <span className="text-lg font-extrabold">Menu</span>
+                <button onClick={closeMenu} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Nav Links */}
+              <div className="flex-1 overflow-y-auto py-4">
+                <div className="space-y-1 px-3">
+                  {navLinks.map(({ to, label, icon: Icon }) => (
+                    <Link
+                      key={to}
+                      to={to}
+                      onClick={closeMenu}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+                        location.pathname === to
+                          ? 'bg-primary/20 text-primary'
+                          : 'text-white/60 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Icon className="w-5 h-5" />
+                      {label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+
+              {/* Upload Button at Bottom */}
+              {user && (
+                <div className="p-4 border-t border-white/5">
+                  <button
+                    onClick={() => {
+                      closeMenu();
+                      onOpenUpload();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-black rounded-xl font-bold text-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Unggah Karya
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </>
         )}
-      </div>
-    </nav>
+      </AnimatePresence>
+    </>
   );
 });
 
