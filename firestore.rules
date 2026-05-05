@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'username', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.username is string && data.username.size() >= 3 &&
+             data.createdAt == request.time;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'MKikik27@gmail.com';
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['username', 'avatarUrl', 'bio'])
+      );
+    }
+
+    function isValidArtwork(data) {
+      return data.keys().hasAll(['title', 'imageUrl', 'prompt', 'artistId', 'artistName', 'likesCount', 'copyCount', 'createdAt']) &&
+             data.title is string && data.title.size() <= 200 &&
+             data.artistId == request.auth.uid &&
+             data.likesCount is number &&
+             data.copyCount is number &&
+             (!('tags' in data) || data.tags is list) &&
+             data.createdAt == request.time;
+    }
+
+    match /artworks/{artworkId} {
+      allow get, list: if true;
+      allow create: if isSignedIn() && isValidArtwork(incoming());
+      allow update: if isSignedIn() && (
+        (isOwner(existing().artistId) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'prompt'])) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'copyCount'])) ||
+        isAdmin()
+      );
+      allow delete: if isOwner(existing().artistId) || isAdmin();
+    }
+
+    match /artworks/{artworkId}/likes/{userId} {
+      allow get, list: if true;
+      allow create: if isOwner(userId) && incoming().userId == request.auth.uid;
+      allow delete: if isOwner(userId);
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}

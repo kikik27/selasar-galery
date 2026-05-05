@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // User Profile Validation
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'username', 'createdAt']) &&
+             data.keys().size() <= 6 &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 256 &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 32 &&
+             data.createdAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['username', 'avatarUrl', 'bio']);
+    }
+
+    // Artwork Validation
+    function isValidArtwork(data) {
+      return data.keys().hasAll(['title', 'imageUrl', 'prompt', 'artistId', 'artistName', 'likesCount', 'copyCount', 'createdAt']) &&
+             data.keys().size() <= 9 &&
+             data.title is string && data.title.size() <= 100 &&
+             data.imageUrl is string && data.imageUrl.size() <= 1000 &&
+             data.prompt is string && data.prompt.size() <= 2000 &&
+             data.artistId == request.auth.uid &&
+             data.likesCount is number && data.likesCount >= 0 &&
+             data.copyCount is number && data.copyCount >= 0 &&
+             data.createdAt == request.time;
+    }
+
+    match /artworks/{artworkId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && isValidArtwork(incoming());
+      allow update: if isSignedIn() && (
+        // Action: Edit by owner
+        (isOwner(existing().artistId) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'prompt']) && isValidArtwork(incoming())) ||
+        // Action: Increment stats (Like/Copy) - typically done via increment()
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'copyCount']) && 
+         incoming().likesCount >= existing().likesCount && 
+         incoming().copyCount >= existing().copyCount)
+      );
+      allow delete: if isOwner(existing().artistId);
+    }
+
+    // Interaction Validation
+    function isValidLike(data, aid) {
+      return data.userId == request.auth.uid &&
+             data.artworkId == aid &&
+             data.createdAt == request.time;
+    }
+
+    match /artworks/{artworkId}/likes/{userId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isOwner(userId) && isValidLike(incoming(), artworkId);
+      allow delete: if isOwner(userId);
+    }
+  }
+}

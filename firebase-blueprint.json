@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and gallery statistics.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "username"]
+    },
+    "Artwork": {
+      "title": "AI Artwork",
+      "description": "A piece of AI-generated art with its prompt and engagement stats.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "prompt": { "type": "string" },
+        "artistId": { "type": "string" },
+        "artistName": { "type": "string" },
+        "likesCount": { "type": "number" },
+        "copyCount": { "type": "number" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "imageUrl", "prompt", "artistId", "createdAt"]
+    },
+    "Like": {
+      "title": "Like Interaction",
+      "description": "A user-artwork like relationship.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "artworkId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Art moderation report",
+      "type": "object",
+      "properties": {
+        "artworkId": { "type": "string" },
+        "artworkTitle": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["artworkId", "reporterId", "reason", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Public and private user profile data."
+    },
+    "/artworks/{artworkId}": {
+      "schema": "Artwork",
+      "description": "The main gallery of artworks."
+    },
+    "/artworks/{artworkId}/likes/{userId}": {
+      "schema": "Like",
+      "description": "Subcollection to track unique likes per user."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Moderation reports."
+    }
+  }
+}
