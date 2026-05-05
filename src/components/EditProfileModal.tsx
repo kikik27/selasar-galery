@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, Image as ImageIcon, Loader2, Save, Camera } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
+import imageCompression from 'browser-image-compression';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { UserProfile } from '../types';
 
@@ -51,8 +52,25 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
       throw new Error('ImgBB API key is missing. Please add VITE_IMGBB_API_KEY to your .env file.');
     }
 
+    // Compress avatar image - smaller since it's just a profile pic
+    const options = {
+      maxSizeMB: 0.5,           // Max 500KB for avatars
+      maxWidthOrHeight: 512,    // 512px is more than enough for profile pics
+      useWebWorker: true,
+      initialQuality: 0.8       // 80% quality (avatars don't need max quality)
+    };
+    
+    let fileToUpload = file;
+    try {
+      if (file.size > 0.5 * 1024 * 1024) {
+        fileToUpload = await imageCompression(file, options);
+      }
+    } catch (error) {
+      console.warn("Image compression failed, uploading original:", error);
+    }
+
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', fileToUpload);
 
     const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
       method: 'POST',

@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Upload, Send, Sparkles, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import imageCompression from 'browser-image-compression';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 
@@ -43,8 +44,30 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
       throw new Error('ImgBB API key is missing. Please add VITE_IMGBB_API_KEY to your .env file.');
     }
 
+    setUploadProgress(10); // Start compression
+    
+    // Compress Image
+    const options = {
+      maxSizeMB: 1.5,          // Max size ~1.5MB
+      maxWidthOrHeight: 1920,  // Max dimension (1080p-1440p range)
+      useWebWorker: true,
+      initialQuality: 0.85     // 85% quality (excellent balance)
+    };
+    
+    let fileToUpload = file;
+    try {
+      // Only compress if file is larger than 1.5MB
+      if (file.size > 1.5 * 1024 * 1024) {
+        fileToUpload = await imageCompression(file, options);
+      }
+    } catch (error) {
+      console.warn("Image compression failed, uploading original:", error);
+    }
+    
+    setUploadProgress(30); // Compression done, start upload
+
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', fileToUpload);
 
     const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
       method: 'POST',
@@ -54,6 +77,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
     if (!response.ok) {
       throw new Error('Failed to upload image to ImgBB');
     }
+
+    setUploadProgress(70); // Upload done, start Firestore write
 
     const data = await response.json();
     return data.data.url;
@@ -70,10 +95,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onSuc
       .filter(t => t.length > 0);
 
     try {
-      // 1. Upload Image to ImgBB
-      setUploadProgress(30);
+      // 1. Upload Image to ImgBB (includes compression)
       const imageUrl = await uploadToImgBB(imageFile);
-      setUploadProgress(70);
 
       // 2. Add Document to Firestore
       await addDoc(collection(db, 'artworks'), {
